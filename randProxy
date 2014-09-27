@@ -1,0 +1,33 @@
+#!/bin/bash
+# pick a random proxy from a list
+# and push the proxy config to a dd-wrt router
+# and start the vpn
+# put this in a crontab or w/e
+
+# line seperated list of a bunch of proxies
+proxylist='/home/er0k/proxy/all'
+# where we are storing the vpn config, certs, routes, etc
+wrtDir='/home/er0k/wrt'
+# dd-wrt name
+# aliased with ssh config, using public key login
+wrt='wrt'
+# get a random proxy url from the list
+proxy=`sort -R $proxylist | head -n1`
+echo "connecting to $proxy..."
+
+# replace the proxy url in the openvpn conf
+sed -i -e "s/[[:space:]].\+\.proxyname\.tld/ $proxy/" $wrtDir/openvpn.conf
+
+# check for the proxy config on wrt router
+if (ssh $wrt '[ -d /tmp/proxy ]'); then
+  echo 'proxy dir already exists'
+else
+  echo 'creating proxy dir...'
+  ssh $wrt mkdir /tmp/proxy
+fi
+
+# copy the vpn files
+scp $wrtDir/* $wrt:/tmp/proxy/
+
+# start the vpn
+ssh $wrt 'killall openvpn; openvpn --config /tmp/proxy/openvpn.conf --route-up /tmp/proxy/route-up.sh --down /tmp/proxy/route-down.sh'
