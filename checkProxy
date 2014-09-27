@@ -1,0 +1,28 @@
+#!/bin/bash
+# check a wrt router if proxy is running
+# 
+# for obvious reasons do not run this on a machine connected to the wrt router
+# you are trying to verify :P
+#
+# make sure ssh config and public key login to router is aok
+
+# get the current home IP
+homeIp=`curl -s er0k.net/ip/`
+
+# get the proxy IP
+# wrt doesn't have curl, so use wget
+proxIp=`ssh -q wrt 'mkdir /tmp/proxy; wget -q http://er0k.net/ip.php -O /tmp/proxy/ip; cat /tmp/proxy/ip'`
+
+echo $proxIp
+
+if [ $homeIp != $proxIp ]
+then
+  echo "proxy is all good"
+else
+  echo "proxy is DOWN"
+fi
+
+echo
+
+# geolocate the proxy IP
+curl "er0k.net/ip.php?ip=$proxIp&loc=y&txt=1"
