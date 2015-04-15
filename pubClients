@@ -1,188 +1,321 @@
-#!/usr/bin/env php
+#!/usr/bin/php
 <?php
-/**
-scrape DD-WRT router page for LAN clients and log them 
-put this in a cron job or w/e
-**/
 
-$router = '192.168.1.1';
-$user = 'root';
-$pass = 'password';
-$file = '/tmp/lan/pub';
-$logfile = '/var/log/lan/pub';
+/*
 
-// get lan status from router
-$ch = curl_init("http://$router/Status_Lan.live.asp");
+wifi status response:
 
-curl_setopt($ch, CURLOPT_HEADER, 0);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-curl_setopt($ch, CURLOPT_USERPWD, "$user:$pass");
+	{wl_mac::00:00:00:00:00:10}
+	{wl_ssid::open_1MBps_nomap}
+	{wl_channel::3}
+	{wl_radio::Radio is On}
+	{wl_xmit::71 mW}
+	{wl_rate::54 Mbps}
+	{wl_ack::}
+	{active_wireless::'9C:D9:17:34:69:C6','eth1','N/A','N/A','N/A','-56','-78','22','465'}
+	{active_wds::}
+	{packet_info::SWRXgoodPacket=114643;SWRXerrorPacket=0;SWTXgoodPacket=196104;SWTXerrorPacket=52;}
+	{uptime:: 00:29:14 up 13 days,  1:06, load average: 0.00, 0.01, 0.00}
+	{ipinfo::&nbsp;IP: 10.11.11.2}
 
-$out = curl_exec($ch);
-curl_close($ch);
+lan status response:
 
-// put status results into array
-$array = explode("\n", $out);
-array_pop($array);
+	{lan_mac::00:00:00:00:00:10}
+	{lan_ip::192.168.1.1}
+	{lan_ip_prefix::192.168.1.}
+	{lan_netmask::255.255.255.0}
+	{lan_gateway::0.0.0.0}
+	{lan_dns::0.0.0.0}
+	{lan_proto::dhcp}
+	{dhcp_daemon::DNSMasq}
+	{dhcp_start::100}
+	{dhcp_num::50}
+	{dhcp_lease_time::1440}
+	{dhcp_leases:: 'e5','192.168.1.136','8C:3A:E3:46:79:B3','1 day 00:00:00','136'}
+	{pptp_leases::}
+	{pppoe_leases::}
+	{arp_table:: 'e5','192.168.1.136','8C:3A:E3:46:79:B3','2'}
+	{uptime:: 15:38:48 up 14 days, 16:16, load average: 0.13, 0.15, 0.10}
+	{ipinfo::&nbsp;IP: 10.11.11.2}
 
-// build the lan array
-// with setting name as key
-// and setting value as value
-foreach($array as $key => $value) {
-	// strip out curly braces
-	$rem = array('{','}');
-	$value = str_replace($rem,'',$value);
-	
-	#echo "$value\n";
-
-	$array[$key] = explode('::', $value);
-
-	$a = $array[$key][0];
-	$b = $array[$key][1];
-	$lan[$a] = $b;
-}
-
-$l = explode(',',$lan['dhcp_leases']);
-$a = explode(',',$lan['arp_table']);
-
-$leases = $arps = array();
-$li = $ai = 0;
-
-// create array for dhcp leases
-foreach ($l as $lkey => $lval) {
-	if ($lkey % 5 == 0) {
-		$li++;
-		$lj = 0;
-	}
-	switch ($lj) {
-		case 0: $key = 'host'; break;
-		case 1: $key = 'ip'; break;
-		case 2: $key = 'mac'; break;
-		case 3: $key = 'time'; break;
-		case 4: $key = 'num'; break;
-	}
-	$leases[$li][$key] = str_replace("'", '', $lval);
-	$lj++;
-}
-
-// create array for arp table
-foreach ($a as $akey => $aval) {
-	if ($akey % 4 == 0) {
-		$ai++;
-		$aj = 0;
-	}
-	switch ($aj) {
-		case 0: $key = 'host'; break;
-		case 1: $key = 'ip'; break;
-		case 2: $key = 'mac'; break;
-		case 3: $key = 'connects'; break;
-	}
-	$arps[$ai][$key] = str_replace("'", '', $aval);
-	$aj++;
-}
-
-// merge leases and aprs back to lan array
-$lan['dhcp_leases'] = $leases;
-$lan['arp_table'] = $arps;
-
-/**
- * lan_mac		=> mac address of lan adapter
- * lan_ip		=> ip of lan adapter
- * lan_ip_prefix	=>
- * lan_netmast		=>
- * lan_gateway		=>
- * lan_dns		=>
- * lan_proto		=>
- * dhcp_daemon		=>
- * dhcp_start		=>
- * dhcp_num		=>
- * dhcp_lease_time	=> lease time in seconds
- * dhcp_leases
- * 	n
- * 		host		=> hostname
- * 		ip		=> ip address
- * 		mac		=> mac address
- * 		time		=> lease time
- * 		num		=> ip suffix
- * arp_table
- * 	n
- * 		host		=> hostname
- * 		ip		=> ip address
- * 		mac		=> mac address
- * 		connects	=> number of IP connections
  */
 
-$msg = $msg2 = '';
+$router = '192.168.1.1';
 
-// if there are active clients, put info in msg
-foreach($lan['arp_table'] as $client) {
-	if (array_key_exists('host', $client) &&
-		array_key_exists('ip', $client) &&
-		array_key_exists('mac', $client) &&
-		array_key_exists('connects', $client)
+$user = 'root';
+$pass = 'password';
+
+$wifiStatus = "http://$router/Status_Wireless.live.asp";
+$lanStatus = "http://$router/Status_Lan.live.asp";
+
+// check router every 3.5 seconds
+$delay = 3.5 * 1000000;
+
+// time before checking arp table/dhcp leases again
+// 1 hour in seconds
+$lanTimeout = 3600;
+
+$refreshLan = false;
+
+send_remote_syslog('starting pub clients daemon', $router, 'clients');
+
+while (true) {
+
+	echo date('c') . "\t";
+
+	if (!isset($pub)) {
+		$pub = array();
+	}
+
+	$clients = array();
+
+	// if it doesn't already exist, or it's midnight
+	// reset the old clients array
+	// this way we can output the diff each new day
+	if (!isset($clientsOld) || (date('H') == 0 && date('i') == 0)) {
+		$clientsOld = array();
+	}
+
+	getWifiStatus($pub);
+
+	// if we have some wireless clients
+	if (
+		isset($pub['active_wireless']) && 
+		is_array($pub['active_wireless']) && 
+		count($pub['active_wireless']) > 0
 	) {
-		$hasClients = true;
-		$msg .= trim($client['ip'])."\t";
-		$msg .= trim($client['mac'])."\t";
-		$msg .= trim($client['host'])."\t";
-	} else {
-		$hasClients = false;
-		$msg .= 'no clients';
-	}
-	$msg .= "\n";
-}
-
-// set up files for diff
-$old = $file . '.bak';
-$new = $file;
-
-// move new file to old
-if(file_exists($new)) {
-	if(file_exists($old)) {
-		unlink($old);
-	}
-	rename($new,$old);
-}
-
-// write new file
-if(!$fp = fopen($new, 'w')) {
-	echo "cannot open $new\n";
-} else {
-	if (fwrite($fp, $msg) === FALSE) {
-		echo "cannot write to $new";
-	}
-	fclose($fp);
-}
-
-// diff old to new
-$cmd = "diff $old $new";
-$output = shell_exec($cmd);
-
-// if there is a difference
-if ($output) {
-	// if ($hasClients) {
-	// 	// nmap each client
-	// 	foreach ($wifi as $n => $client) {
-	// 		$cmd2 = 'nmap '.$wifi[$n][1];
-	// 		$msg2 .= shell_exec($cmd2);
-	// 	}
-	// }
-
-	// write to log
-	$tmplog = explode("\n", $msg);
-	foreach ($tmplog as $key => $line) {
-		if (!empty($line)) $tmplog[$key] = date('r')."\t".$line;
-	}
-	$log = implode("\n", $tmplog);
-
-	if(!$fp = fopen($logfile, 'a')) {
-		echo "cannot open logfile\n";
-	} else {
-		if (fwrite($fp, $log) === FALSE) {
-			echo "cannot write to $new";
+		// if we don't already have the arp and dhcp 
+		// or the timeout has passed, 
+		// or we explicitly want to refresh the lan status
+		// get the lan status
+		if (
+			(empty($pub['arp_table']) && empty($pub['dhcp_leases'])) || 
+			time() - $pub['time'] > $lanTimeout || 
+			$refreshLan
+		) {
+			// reset the timestamp
+			$pub['time'] = time();
+			echo "ping lan\t";
+			getLanStatus($pub);
+		} else {
+			echo "cached lan\t";
 		}
-		fclose($fp);
+		foreach ($pub['active_wireless'] as $client) {
+			// enter the client mac to the clients array
+			// if we can't find a match in arp or dhcp
+			// this should never actually happen, but just in case...
+			$clients[$client['mac']] = array('mac' => $client['mac']);
+			// try to match mac to arp table
+			if (!empty($pub['arp_table'])) {
+				echo "ARP\t";
+				foreach ($pub['arp_table'] as $arp) {
+					if ($client['mac'] == $arp['arpmac']) {
+						$clients[$client['mac']] = array(
+							'ip'     => $arp['ip'],
+							'host'   => $arp['host'],
+							'mac'    => $arp['arpmac'],
+							#'signal' => ($client['quality'] / 10) . '%'
+						);
+					}
+				}
+			// if no arp table, try to match mac from dhcp leases
+			} else if (!empty($pub['dhcp_leases'])) {
+				echo "DHCP\t";
+				foreach ($pub['dhcp_leases'] as $dhcp) {
+					if ($client['mac'] = $dhcp['dhcpmac']) {
+						$clients[$client['mac']] = array(
+							'ip'     => $dhcp['ip'],
+							'host'   => $dhcp['host'],
+							'mac'    => $dhcp['dhcpmac'],
+							#'signal' => ($client['quality'] / 10) . '%'
+						);
+					}
+				}
+			}
+		}
+
+		// clean up
+		foreach ($clients as &$c) {
+			$c = array_map('trim', $c);
+		}
+	} else {
+		// no clients
+		$clients[] = 'none';
 	}
+
+	// sort the array to make comparisons more consistent
+	sort($clients);
+
+	$clientsJson = json_encode($clients);
+	$clientsJsonOld = json_encode($clientsOld);
+
+	if ($clientsJson !== $clientsJsonOld) {
+		$refreshLan = true;
+		echo $clientsJson;
+		send_remote_syslog($clientsJson, $router, 'clients');
+	} else {
+		$refreshLan = false;
+	}
+
+	$clientsOld = $clients;
+	unset($clients, $clientsJson, $clientsJsonOld);
+
+	echo "\n";
+
+	usleep($delay);
+}
+
+function getWifiStatus(&$lan) {
+
+	global $wifiStatus;
+	global $user;
+	global $pass;
+
+	$ch = curl_init($wifiStatus);
+	curl_setopt_array($ch, array(
+		CURLOPT_HEADER         => 0,
+		CURLOPT_RETURNTRANSFER => 1,
+		CURLOPT_CONNECTTIMEOUT => 3,
+		CURLOPT_TIMEOUT        => 30,
+		CURLOPT_USERPWD        => "$user:$pass"
+	));
+	if (!$out = curl_exec($ch)) {
+		echo curl_error($ch);
+		curl_close($ch);
+		return;
+	}
+	curl_close($ch);
+
+	$array = explode("\n", $out);
+	array_pop($array);
+
+	foreach($array as $key => $value) {
+		$rem = array('{','}');
+		$value = str_replace($rem,'',$value);
+		$array[$key] = explode('::', $value);
+		$a = $array[$key][0];
+		$b = $array[$key][1];
+		$lan[$a] = $b;
+	}
+
+	if (!empty($lan['active_wireless'])) {
+		$active_wireless = explode(',', $lan['active_wireless']);
+
+		if (count($active_wireless) > 1) {
+			$active = array();
+			$activeCount = count($active);
+			foreach ($active_wireless as $akey => $aval) {
+				if ($akey % 9 == 0) {
+					$activeCount++;
+					$subkey = 0;
+				}
+				switch ($subkey) {
+					case 0: $key = 'mac'; break;
+					case 1: $key = 'int'; break;
+					case 2: $key = 'uptime'; break;
+					case 3: $key = 'tx_rate'; break;
+					case 4: $key = 'rx_rate'; break;
+					case 5: $key = 'signal'; break;
+					case 6: $key = 'noise'; break;
+					case 7: $key = 'snr'; break;
+					case 8: $key = 'quality'; break;
+				}
+				$active[$activeCount][$key] = str_replace("'", '', $aval);
+				$subkey++;
+			}
+		}
+		$lan['active_wireless'] = $active;
+	}
+}
+
+function getLanStatus(&$lan) {
+
+	global $lanStatus;
+	global $user;
+	global $pass;
+
+	$ch = curl_init($lanStatus);
+	curl_setopt_array($ch, array(
+		CURLOPT_HEADER         => 0,
+		CURLOPT_RETURNTRANSFER => 1,
+		CURLOPT_CONNECTTIMEOUT => 3,
+		CURLOPT_TIMEOUT        => 30,
+		CURLOPT_USERPWD        => "$user:$pass"
+	));
+	if (!$out = curl_exec($ch)) {
+		echo curl_error($ch);
+		curl_close($ch);
+		return;
+	}
+	curl_close($ch);
+
+	$array = explode("\n", $out);
+	array_pop($array);
+
+	foreach($array as $key => $value) {
+		$rem = array('{','}');
+		$value = str_replace($rem,'',$value);
+		$array[$key] = explode('::', $value);
+		$a = $array[$key][0];
+		$b = $array[$key][1];
+		$lan[$a] = $b;
+	}
+	
+	if (!empty($lan['arp_table'])) {
+		$a = explode(',',$lan['arp_table']);
+		$arps = array();
+		$ai = 0;
+		foreach ($a as $akey => $aval) {
+			if ($akey % 4 == 0) {
+				$ai++;
+				$aj = 0;
+			}
+			switch ($aj) {
+				case 0: $key = 'host'; break;
+				case 1: $key = 'ip'; break;
+				case 2: $key = 'arpmac'; break;
+				case 3: $key = 'connects'; break;
+			}
+			$arps[$ai][$key] = str_replace("'", '', $aval);
+			$aj++;
+		}
+		$lan['arp_table'] = $arps;
+	}
+
+	if (!empty($lan['dhcp_leases'])) {
+		$l = explode(',',$lan['dhcp_leases']);
+		$leases = array();
+		$li = 0;
+		foreach ($l as $lkey => $lval) {
+			if ($lkey % 5 == 0) {
+				$li++;
+				$lj = 0;
+			}
+			switch ($lj) {
+				case 0: $key = 'host'; break;
+				case 1: $key = 'ip'; break;
+				case 2: $key = 'dhcpmac'; break;
+				case 3: $key = 'time'; break;
+				case 4: $key = 'num'; break;
+			}
+			$leases[$li][$key] = str_replace("'", '', $lval);
+			$lj++;
+		}
+		$lan['dhcp_leases'] = $leases;
+	}		
+}
+
+/*
+	from papertrail app
+	https://gist.github.com/troy/2220679
+ */
+function send_remote_syslog($message, $program = 'PHP', $component = 'script') {
+	$sock = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+	foreach(explode("\n", $message) as $line) {
+		$syslog_message = '<22>' . date('M d H:i:s ') . $program . ' ' . $component . ': ' . $line;
+		socket_sendto($sock, $syslog_message, strlen($syslog_message), 0, 'prox.r0k', 514);
+	}
+	socket_close($sock);
 }
 
 ?>
