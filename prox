@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# get the current home IP
+homeIp=`curl -s er0k.net/ip.php`
+
+# get the proxy IP
+proxIp=`ssh -q pub 'mkdir /tmp/proxy; wget -q http://er0k.net/ip.php -O /tmp/proxy/ip; cat /tmp/proxy/ip'`
+
+proxyList='/home/er0k/proxy/all'
+pub='/home/er0k/pub'
+
+if [ $homeIp != $proxIp ]
+then
+  echo "proxy is up"
+  curl "er0k.net/ip.php?ip=$proxIp&loc=y&txt=1"
+else
+  echo "proxy is DOWN"
+  # get a random proxy url from the list
+  proxy=`sort -R $proxyList | head -n1`
+  echo "trying $proxy..."
+  # replace the proxy url in the openvpn conf
+  sed -i -e "s/[[:space:]].\+\.proxy\.sh/ $proxy/" $pub/openvpn.conf
+
+  # check for the proxy config on pub router
+  if (ssh pub '[ -d /tmp/proxy ]'); then
+    echo 'proxy dir already exists'
+  else
+    echo 'creating proxy dir...'
+    ssh pub mkdir /tmp/proxy
+  fi
+
+  # copy the vpn files
+  scp /home/er0k/pub/* pub:/tmp/proxy/
+
+  # start the vpn
+  ssh pub 'killall openvpn; openvpn --config /tmp/proxy/openvpn.conf --route-up /tmp/proxy/route-up.sh --down /tmp/proxy/route-down.sh'
+fi
+
