@@ -1,5 +1,7 @@
 #!/usr/bin/php
 <?php
+// this is a daemon to check dd-wrt for wifi clients
+// and log connection changes to a remote syslog server
 
 /*
 
