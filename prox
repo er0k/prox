@@ -1,4 +1,6 @@
 #!/bin/bash
+# check if the proxy is up on dd-wrt
+# if not, attempt to connect to a random proxy
 
 # get the current home IP
 homeIp=`curl -s er0k.net/ip.php`
