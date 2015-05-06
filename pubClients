@@ -51,7 +51,8 @@ $wifiStatus = "http://$router/Status_Wireless.live.asp";
 $lanStatus = "http://$router/Status_Lan.live.asp";
 
 // check router every 3.5 seconds
-$delay = 3.5 * 1000000;
+$delaySeconds = 3.5;
+$delay = $delaySeconds * 1000000;
 
 // time before checking arp table/dhcp leases again
 // 1 hour in seconds
@@ -74,7 +75,7 @@ while (true) {
 	// if it doesn't already exist, or it's midnight
 	// reset the old clients array
 	// this way we can output the diff each new day
-	if (!isset($clientsOld) || (date('H') == 0 && date('i') == 0)) {
+	if (!isset($clientsOld) || (date('H') == 0 && date('i') == 0 && date('s') < round($delaySeconds))) {
 		$clientsOld = array();
 	}
 
