@@ -1,54 +1,76 @@
 #!/bin/bash
 # check if the proxy is up on dd-wrt
 # if not, attempt to connect to a random proxy
-# @todo : add flag to force new proxy connection
+# run this in a crontab every so often
+# @todo : add flag to force new proxy
 
-# get the current home IP
-homeIp=`curl -s --cacert /etc/ssl/certs/private/er0k.net.pem https://er0k.net/ip.php`
+# IP or hostname of dd-wrt router
+# use public key authentication
+wrt=pub
 
-# get the proxy IP
-proxIp=`ssh -q pub 'mkdir /tmp/proxy; wget -q http://er0k.net/ip.php -O /tmp/proxy/ip; cat /tmp/proxy/ip'`
+# ssh/scp control socket
+socket=/tmp/prox-sock
 
-# get the proxy SSID
-currSsid=`ssh -q pub 'wl ssid' | cut -d '"' -f2`
-
-proxyList='/home/er0k/proxy/all'
-pub='/home/er0k/pub'
-
-if [ "$homeIp" != "$proxIp" ];
+if [ -e "$socket" ];
 then
-  echo "proxy is up"
-  ssid=`curl -s --cacert /etc/ssl/certs/private/er0k.net.pem "https://er0k.net/ip.php?ip=$proxIp&loc=y&ssid=y&pre=2Mbps_proxy_"`
-  if [ "$ssid" != "$currSsid" ];
-  then
-    ssh pub "wl ssid $ssid"
-  fi
-  curl --cacert /etc/ssl/certs/private/er0k.net.pem "https://er0k.net/ip.php?ip=$proxIp&loc=y&txt=1"
-else
-  echo "proxy is DOWN"
-  if [ "$ssid" != "$currSsid" ];
-  then
-    ssh pub "wl ssid 2Mbps_open_nomap"
-  fi
-  # get a random proxy url from the list
-  proxy=`sort -R $proxyList | head -n1`
-  echo "trying $proxy..."
-  # replace the proxy url in the openvpn conf
-  #sed -i -e "s/[[:space:]].\+\.proxy\.sh/ $proxy/" $pub/openvpn.conf
-  sed -i -e "s/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/$proxy/" $pub/openvpn.conf
-
-  # check for the proxy config on pub router
-  if (ssh pub '[ -d /tmp/proxy ]'); then
-    echo 'proxy dir already exists'
-  else
-    echo 'creating proxy dir...'
-    ssh pub mkdir /tmp/proxy
-  fi
-
-  # copy the vpn files
-  scp /home/er0k/pub/* pub:/tmp/proxy/
-
-  # start the vpn
-  ssh pub 'killall openvpn; openvpn --config /tmp/proxy/openvpn.conf --route-up /tmp/proxy/route-up.sh --down /tmp/proxy/route-down.sh'
+    exit 1
 fi
 
+# start the shared ssh socket
+ssh -M -S $socket -fnNT $wrt
+
+checkProxy () {
+    # get the current home IP
+    homeIp=`curl -s --cacert /etc/ssl/certs/private/er0k.net.pem https://er0k.net/ip.php`
+
+    # get the proxy IP
+    proxIp=`ssh -S $socket -q $wrt 'mkdir -p /tmp/proxy; wget -q http://er0k.net/ip.php -O /tmp/proxy/ip; cat /tmp/proxy/ip'`
+
+    # get the proxy SSID
+    currSsid=`ssh -S $socket -q $wrt 'wl ssid' | cut -d '"' -f2`
+
+    # newline separated list of proxy IPs
+    proxyList='/home/er0k/proxy/all'
+    # directory containing openvpn conf files
+    vpnDir='/home/er0k/pub'
+
+    if [ "$homeIp" != "$proxIp" ];
+    then
+        echo "proxy is up"
+        ssid=`curl -s --cacert /etc/ssl/certs/private/er0k.net.pem "https://er0k.net/ip.php?ip=$proxIp&loc=y&ssid=y&pre=2Mbps_proxy_"`
+        if [ "$ssid" != "$currSsid" ];
+        then
+            ssh -S $socket $wrt "wl ssid $ssid"
+        fi
+        curl --cacert /etc/ssl/certs/private/er0k.net.pem "https://er0k.net/ip.php?ip=$proxIp&loc=y&txt=1"
+
+        return 0
+    else
+        echo "proxy is DOWN"
+        if [ "$ssid" != "$currSsid" ];
+        then
+            ssh -S $socket $wrt "wl ssid 2Mbps_open_nomap"
+        fi
+        # get a random proxy url from the list
+        proxy=`sort -R $proxyList | head -n1`
+        echo "trying $proxy..."
+        # replace the proxy url in the openvpn conf
+        sed -i -e "s/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/$proxy/" $vpnDir/openvpn.conf
+
+        # copy the vpn files
+        scp -o ControlPath=$socket $vpnDir/* $wrt:/tmp/proxy/
+
+        # start the vpn
+        ssh -S $socket $wrt 'killall openvpn; openvpn --config /tmp/proxy/openvpn.conf --route-up /tmp/proxy/route-up.sh --down /tmp/proxy/route-down.sh'
+
+        # give some time for vpn connection negotiation and then recheck
+        echo 'waiting 1 minute...'
+        sleep 60
+        checkProxy
+    fi
+}
+
+checkProxy
+
+# close the socket
+ssh -S $socket -O exit $wrt
