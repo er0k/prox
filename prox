@@ -1,8 +1,8 @@
 #!/bin/bash
 # check if the proxy is up on dd-wrt
 # if not, attempt to connect to a random proxy
+# will keep trying a random IP until connection is successful
 # run this in a crontab every so often
-# @todo : add flag to force new proxy
 
 # IP or hostname of dd-wrt router
 # use public key authentication
@@ -10,6 +10,22 @@ wrt=pub
 
 # ssh/scp control socket
 socket=/tmp/prox-sock
+
+# location outside your LAN to get external IP
+extIp="https://er0k.net/ip.php"
+
+# default SSID if proxy is not active
+SSIDdefault="2Mbps_open_nomap"
+
+# SSID prefix when proxy is active. geolocation will be appended
+SSIDprefix="2Mbps_proxy_"
+
+# newline separated list of proxy IPs
+proxyList='/home/er0k/proxy/all'
+
+# directory containing openvpn conf files
+vpnDir='/home/er0k/pub'
+
 
 if [ -e "$socket" ];
 then
@@ -19,37 +35,41 @@ fi
 # start the shared ssh socket
 ssh -M -S $socket -fnNT $wrt
 
+# pass any argument to force a new vpn connection
+if [ $# -gt 0 ];
+then
+    echo 'killing existing proxy...'
+    ssh -S $socket $wrt 'killall openvpn'
+fi
+
 checkProxy () {
     # get the current home IP
-    homeIp=`curl -s --cacert /etc/ssl/certs/private/er0k.net.pem https://er0k.net/ip.php`
+    homeIp=`curl -s --cacert /etc/ssl/certs/private/er0k.net.pem $extIp`
 
     # get the proxy IP
+    # wget on dd-wrt does not seem to be compiled with SSL support,
+    # and curl is not available, so we must use http :(
     proxIp=`ssh -S $socket -q $wrt 'mkdir -p /tmp/proxy; wget -q http://er0k.net/ip.php -O /tmp/proxy/ip; cat /tmp/proxy/ip'`
 
     # get the proxy SSID
     currSsid=`ssh -S $socket -q $wrt 'wl ssid' | cut -d '"' -f2`
 
-    # newline separated list of proxy IPs
-    proxyList='/home/er0k/proxy/all'
-    # directory containing openvpn conf files
-    vpnDir='/home/er0k/pub'
-
     if [ "$homeIp" != "$proxIp" ];
     then
         echo "proxy is up"
-        ssid=`curl -s --cacert /etc/ssl/certs/private/er0k.net.pem "https://er0k.net/ip.php?ip=$proxIp&loc=y&ssid=y&pre=2Mbps_proxy_"`
+        ssid=`curl -s --cacert /etc/ssl/certs/private/er0k.net.pem "$extIp?ip=$proxIp&loc=y&ssid=y&pre=$SSIDprefix"`
         if [ "$ssid" != "$currSsid" ];
         then
             ssh -S $socket $wrt "wl ssid $ssid"
         fi
-        curl --cacert /etc/ssl/certs/private/er0k.net.pem "https://er0k.net/ip.php?ip=$proxIp&loc=y&txt=1"
+        curl --cacert /etc/ssl/certs/private/er0k.net.pem "$extIp?ip=$proxIp&loc=y&txt=1"
 
         return 0
     else
         echo "proxy is DOWN"
-        if [ "$ssid" != "$currSsid" ];
+        if [ "$SSIDdefault" != "$currSsid" ];
         then
-            ssh -S $socket $wrt "wl ssid 2Mbps_open_nomap"
+            ssh -S $socket $wrt "wl ssid $SSIDdefault"
         fi
         # get a random proxy url from the list
         proxy=`sort -R $proxyList | head -n1`
