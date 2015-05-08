@@ -1,0 +1,12 @@
+iptables -F
+# drop all traffic to router
+iptables -I INPUT -i br0 -m state --state NEW -j DROP
+# allow DHCP
+iptables -I INPUT -i br0 -p udp --dport 67 -j ACCEPT
+# allow DNS
+iptables -I INPUT -i br0 -p udp --dport 53 -j ACCEPT
+iptables -I INPUT -i br0 -p tcp --dport 53 -j ACCEPT
+# drop everything from dd-wrt subnet to main subnet
+iptables -A FORWARD -p all -s 192.168.1.0/24 -d 10.11.11.0/24 -m state --state NEW -j DROP
+# allow main subnet to send traffic to dd-wrt subnet (set up static route on main router first)
+iptables -A FORWARD -p all -s 10.11.11.0/24 -d 192.168.1.0/24 -m state --state ESTABLISHED,RELATED -j ACCEPT
