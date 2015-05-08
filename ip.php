@@ -1,6 +1,6 @@
 <?php
 // geolocate ip address
-
+setlocale(LC_ALL, 'en_US.UTF8');
 $ip = isset($_GET['ip']) ? $_GET['ip'] : $_SERVER['REMOTE_ADDR'];
 $loc = isset($_GET['loc']) ? $_GET['loc'] : '';
 $txt = isset($_GET['txt']) ? true : false;
@@ -14,7 +14,7 @@ if (filter_var($ip, FILTER_VALIDATE_IP)) {
     $host = gethostbyaddr($ip);
 }
 
-if($loc=="y") {
+if ($loc == 'y') {
     require_once('geo.php');
     $gi = geoip_open($geoipdb,GEOIP_STANDARD);
     $record = geoip_record_by_addr($gi,$ip);
@@ -26,7 +26,13 @@ if($loc=="y") {
     } else if ($ssid) {
         $country = strtok(str_replace(' ', '', $record->country_name), "\n");
         $city = str_replace(' ', '', $record->city);
-        $output = substr(str_replace(',', '', $prefix . $city . $country), 0, 32);
+        if ($country === 'UnitedStates') {
+            $country = 'US';
+        } else if ($country === 'UnitedKingdom') {
+            $country = 'UK';
+        }
+        $region = $country === 'US' ? $record->region : '';
+        $output = substr(str_replace(',', '', $prefix . $city . $region . $country), 0, 32);
     } else {
         $output = "<p>".$ip." (".$host.")</p>\n";
         $output .= "<p>".$record->country_name . "</p>\n";
@@ -34,11 +40,9 @@ if($loc=="y") {
         $output .= '<p><a href="http://maps.google.com/maps?q='.$record->latitude.'+'.$record->longitude.'">'.$record->latitude.' '.$record->longitude.'</a></p>';
     }
     geoip_close($gi);
-
-    print $output;
-
+    echo iconv('ISO-8859-1', 'ASCII//TRANSLIT//IGNORE', $output);
 } else {
-    print $ip;
+    echo $ip;
 }
 
 ?>
