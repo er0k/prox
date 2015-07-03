@@ -11,8 +11,8 @@ wrt=pub
 # ssh/scp control socket
 socket=/tmp/prox-sock
 
-# location outside your LAN to get external IP
-extIp="https://er0k.net/ip.php"
+# location outside your LAN to get external IP (ip.php)
+ext="er0k.net"
 
 # default SSID if proxy is not active
 SSIDdefault="2Mbps_open_nomap"
@@ -26,9 +26,39 @@ proxyList='/home/er0k/proxy/all'
 # directory containing openvpn conf files
 vpnDir='/home/er0k/pub'
 
+# diretory on wrt to store proxy files
+wrtDir='/tmp/proxy'
+
+# trap ctrl-c and call ctrl_c()
+trap ctrl_c INT
+
+ctrl_c () {
+    echo -n 'closing ssh socket...'
+    if [ -e "$socket" ];
+    then
+        ssh -S $socket -O exit $wrt
+    fi
+    echo 'bye'
+    exit 69
+}
+
+countDown () {
+    for i in `seq 60 -1 0`;
+    do
+        echo -ne "$i .\r"
+        sleep 0.25
+        echo -ne "$i ..\r"
+        sleep 0.25
+        echo -ne "$i ...\r"
+        sleep 0.25
+        echo -ne "$i     \r"
+        sleep 0.25
+    done
+}
 
 if [ -e "$socket" ];
 then
+    echo 'socket already open'
     exit 1
 fi
 
@@ -38,35 +68,39 @@ ssh -M -S $socket -fnNT $wrt
 # pass any argument to force a new vpn connection
 if [ $# -gt 0 ];
 then
-    echo 'killing existing proxy...'
+    echo -n 'killing existing proxy...'
     ssh -S $socket $wrt 'killall openvpn'
+    if [ $? -ne 0 ]; then
+        echo 'ERROR'
+        exit 2
+    else
+        echo 'ok'
+    fi
 fi
 
 checkProxy () {
     # get the current home IP
-    homeIp=`curl -s --cacert /etc/ssl/certs/private/er0k.net.pem $extIp`
+    homeIp=`curl -s --cacert /etc/ssl/certs/private/$ext.pem https://$ext/ip.php`
 
     # get the proxy IP
     # wget on dd-wrt does not seem to be compiled with SSL support,
     # and curl is not available, so we must use http :(
-    proxIp=`ssh -S $socket -q $wrt 'mkdir -p /tmp/proxy; wget -q http://er0k.net/ip.php -O /tmp/proxy/ip; cat /tmp/proxy/ip'`
+    proxIp=`ssh -S $socket -q $wrt "mkdir -p $wrtDir; wget -q http://$ext/ip.php -O $wrtDir/ip; cat $wrtDir/ip"`
 
     # get the proxy SSID
-    currSsid=`ssh -S $socket -q $wrt 'wl ssid' | cut -d '"' -f2`
+    currSsid=`ssh -S $socket -q $wrt 'wl ssid' | cut -d '"' -f 2`
 
     if [ "$homeIp" != "$proxIp" ];
     then
-        echo "proxy is up"
-        ssid=`curl -s --cacert /etc/ssl/certs/private/er0k.net.pem "$extIp?ip=$proxIp&loc=y&ssid=y&pre=$SSIDprefix"`
+        echo "proxy is UP :)"
+        ssid=`curl -s --cacert /etc/ssl/certs/private/$ext.pem "https://$ext/ip.php?ip=$proxIp&loc=y&ssid=y&pre=$SSIDprefix"`
         if [ "$ssid" != "$currSsid" ];
         then
             ssh -S $socket $wrt "wl ssid $ssid"
         fi
-        curl --cacert /etc/ssl/certs/private/er0k.net.pem "$extIp?ip=$proxIp&loc=y&txt=1"
-
-        return 0
+        curl --cacert /etc/ssl/certs/private/$ext.pem "https://$ext/ip.php?ip=$proxIp&loc=y&txt=1"
     else
-        echo "proxy is DOWN"
+        echo "proxy is DOWN :("
         if [ "$SSIDdefault" != "$currSsid" ];
         then
             ssh -S $socket $wrt "wl ssid $SSIDdefault"
@@ -78,14 +112,14 @@ checkProxy () {
         sed -i -e "s/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/$proxy/" $vpnDir/openvpn.conf
 
         # copy the vpn files
-        scp -o ControlPath=$socket $vpnDir/* $wrt:/tmp/proxy/
+        scp -q -o ControlPath=$socket $vpnDir/* $wrt:$wrtDir/
 
         # start the vpn
-        ssh -S $socket $wrt 'killall openvpn; openvpn --config /tmp/proxy/openvpn.conf --route-up /tmp/proxy/route-up.sh --down /tmp/proxy/route-down.sh'
+        ssh -S $socket $wrt "killall openvpn; openvpn --config $wrtDir/openvpn.conf --route-up $wrtDir/route-up.sh --down $wrtDir/route-down.sh"
 
         # give some time for vpn connection negotiation and then recheck
-        echo 'waiting 1 minute...'
-        sleep 60
+        # echo 'waiting 1 minute...'
+        countDown
         checkProxy
     fi
 }
