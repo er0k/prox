@@ -33,12 +33,10 @@ wrtDir='/tmp/proxy'
 trap ctrl_c INT
 
 ctrl_c () {
-    echo -n 'closing ssh socket...'
     if [ -e "$socket" ];
     then
         ssh -S $socket -O exit $wrt
     fi
-    echo 'bye'
     exit 69
 }
 
@@ -93,6 +91,7 @@ checkProxy () {
     if [ "$homeIp" != "$proxIp" ];
     then
         echo "proxy is UP :)"
+        echo "current SSID: $currSsid"
         ssid=`curl -s --cacert /etc/ssl/certs/private/$ext.pem "https://$ext/ip.php?ip=$proxIp&loc=y&ssid=y&pre=$SSIDprefix"`
         if [ "$ssid" != "$currSsid" ];
         then
