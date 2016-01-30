@@ -95,14 +95,14 @@ checkProxy () {
         ssid=`curl -s --cacert /etc/ssl/certs/private/$ext.pem "https://$ext/ip.php?ip=$proxIp&loc=y&ssid=y&pre=$SSIDprefix"`
         if [ "$ssid" != "$currSsid" ];
         then
-            ssh -S $socket $wrt "wl ssid $ssid"
+            ssh -S $socket $wrt "wl ssid $ssid; nvram set wl_ssid $ssid"
         fi
         curl --cacert /etc/ssl/certs/private/$ext.pem "https://$ext/ip.php?ip=$proxIp&loc=y&txt=1"
     else
         echo "proxy is DOWN :("
         if [ "$SSIDdefault" != "$currSsid" ];
         then
-            ssh -S $socket $wrt "wl ssid $SSIDdefault"
+            ssh -S $socket $wrt "wl ssid $SSIDdefault; nvram set wl_ssid $SSIDdefault"
         fi
         # get a random proxy url from the list
         proxy=`sort -R $proxyList | head -n1`
