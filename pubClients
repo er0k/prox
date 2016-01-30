@@ -47,28 +47,25 @@ $router = '192.168.1.1';
 $user = 'root';
 $pass = 'password';
 
-$wifiStatus = "http://$router/Status_Wireless.live.asp";
-$lanStatus = "http://$router/Status_Lan.live.asp";
+$wifiStatusUrl = "http://$router/Status_Wireless.live.asp";
+$lanStatusUrl = "http://$router/Status_Lan.live.asp";
 
 // check router every 3.5 seconds
 $delaySeconds = 3.5;
-$delay = $delaySeconds * 1000000;
 
 // time before checking arp table/dhcp leases again
 // 1 hour in seconds
 $lanTimeout = 3600;
 
 $refreshLan = false;
+$delay = $delaySeconds * 1000000;
+$pub = array();
 
-send_remote_syslog('starting pub clients daemon', $router, 'clients');
+sendRemoteSyslog('starting pub clients daemon', $router, 'pubclients');
 
 while (true) {
 
 	echo date('c') . "\t";
-
-	if (!isset($pub)) {
-		$pub = array();
-	}
 
 	$clients = array();
 
@@ -155,7 +152,7 @@ while (true) {
 	if ($clientsJson !== $clientsJsonOld) {
 		$refreshLan = true;
 		echo $clientsJson;
-		send_remote_syslog($clientsJson, $router, 'clients');
+		sendRemoteSyslog($clientsJson, $router, 'pubclients');
 	} else {
 		$refreshLan = false;
 	}
@@ -168,41 +165,17 @@ while (true) {
 	usleep($delay);
 }
 
-function getWifiStatus(&$lan) {
+function getWifiStatus() {
 
-	global $wifiStatus;
-	global $user;
-	global $pass;
+	global $wifiStatusUrl;
+	global $pub;
 
-	$ch = curl_init($wifiStatus);
-	curl_setopt_array($ch, array(
-		CURLOPT_HEADER         => 0,
-		CURLOPT_RETURNTRANSFER => 1,
-		CURLOPT_CONNECTTIMEOUT => 3,
-		CURLOPT_TIMEOUT        => 30,
-		CURLOPT_USERPWD        => "$user:$pass"
-	));
-	if (!$out = curl_exec($ch)) {
-		echo curl_error($ch);
-		curl_close($ch);
-		return;
-	}
-	curl_close($ch);
+	$wifiStatus = curl($wifiStatusUrl);
 
-	$array = explode("\n", $out);
-	array_pop($array);
+	formatResponseBody($wifiStatus['body']);
 
-	foreach($array as $key => $value) {
-		$rem = array('{','}');
-		$value = str_replace($rem,'',$value);
-		$array[$key] = explode('::', $value);
-		$a = $array[$key][0];
-		$b = $array[$key][1];
-		$lan[$a] = $b;
-	}
-
-	if (!empty($lan['active_wireless'])) {
-		$active_wireless = explode(',', $lan['active_wireless']);
+	if (!empty($pub['active_wireless'])) {
+		$active_wireless = explode(',', $pub['active_wireless']);
 
 		if (count($active_wireless) > 1) {
 			$active = array();
@@ -227,45 +200,21 @@ function getWifiStatus(&$lan) {
 				$subkey++;
 			}
 		}
-		$lan['active_wireless'] = $active;
+		$pub['active_wireless'] = $active;
 	}
 }
 
-function getLanStatus(&$lan) {
+function getLanStatus() {
 
-	global $lanStatus;
-	global $user;
-	global $pass;
+	global $lanStatusUrl;
+	global $pub;
 
-	$ch = curl_init($lanStatus);
-	curl_setopt_array($ch, array(
-		CURLOPT_HEADER         => 0,
-		CURLOPT_RETURNTRANSFER => 1,
-		CURLOPT_CONNECTTIMEOUT => 3,
-		CURLOPT_TIMEOUT        => 30,
-		CURLOPT_USERPWD        => "$user:$pass"
-	));
-	if (!$out = curl_exec($ch)) {
-		echo curl_error($ch);
-		curl_close($ch);
-		return;
-	}
-	curl_close($ch);
+	$lanStatus = curl($lanStatusUrl);
 
-	$array = explode("\n", $out);
-	array_pop($array);
-
-	foreach($array as $key => $value) {
-		$rem = array('{','}');
-		$value = str_replace($rem,'',$value);
-		$array[$key] = explode('::', $value);
-		$a = $array[$key][0];
-		$b = $array[$key][1];
-		$lan[$a] = $b;
-	}
+	formatResponseBody($lanStatus['body']);
 	
-	if (!empty($lan['arp_table'])) {
-		$a = explode(',',$lan['arp_table']);
+	if (!empty($pub['arp_table'])) {
+		$a = explode(',', $pub['arp_table']);
 		$arps = array();
 		$ai = 0;
 		foreach ($a as $akey => $aval) {
@@ -282,11 +231,11 @@ function getLanStatus(&$lan) {
 			$arps[$ai][$key] = str_replace("'", '', $aval);
 			$aj++;
 		}
-		$lan['arp_table'] = $arps;
+		$pub['arp_table'] = $arps;
 	}
 
-	if (!empty($lan['dhcp_leases'])) {
-		$l = explode(',',$lan['dhcp_leases']);
+	if (!empty($pub['dhcp_leases'])) {
+		$l = explode(',', $pub['dhcp_leases']);
 		$leases = array();
 		$li = 0;
 		foreach ($l as $lkey => $lval) {
@@ -304,7 +253,7 @@ function getLanStatus(&$lan) {
 			$leases[$li][$key] = str_replace("'", '', $lval);
 			$lj++;
 		}
-		$lan['dhcp_leases'] = $leases;
+		$pub['dhcp_leases'] = $leases;
 	}		
 }
 
@@ -312,13 +261,55 @@ function getLanStatus(&$lan) {
 	from papertrail app
 	https://gist.github.com/troy/2220679
  */
-function send_remote_syslog($message, $program = 'PHP', $component = 'script') {
+function sendRemoteSyslog($message, $program = 'PHP', $component = 'script') {
 	$sock = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
 	foreach(explode("\n", $message) as $line) {
 		$syslog_message = '<22>' . date('M d H:i:s ') . $program . ' ' . $component . ': ' . $line;
 		socket_sendto($sock, $syslog_message, strlen($syslog_message), 0, 'prox.r0k', 514);
 	}
 	socket_close($sock);
+}
+
+function curl($url) {
+	global $user;
+	global $pass;
+
+	$ch = curl_init($url);
+	curl_setopt_array($ch, array(
+		CURLOPT_HEADER => true,
+		CURLOPT_RETURNTRANSFER => true,
+		CURLOPT_CONNECTTIMEOUT => 3,
+		CURLOPT_TIMEOUT => 3,
+		CURLOPT_USERPWD => "$user:$pass"
+	));
+	if (!$response = curl_exec($ch)) {
+		echo curl_error($ch);
+		curl_close($ch);
+		return;
+	}
+	curl_close($ch);
+	list($header, $body) = explode("\r\n\r\n", $response, 2);
+
+	if (strpos($header, 'HTTP/1.0 401 Unauthorized') !== false) {
+		die("bad password\n");
+	}
+
+	return array($header, $body);
+}
+
+function formatResponseBody($body) {
+	global $pub;
+
+	$lines = explode("\n", $body);
+	array_pop($lines);
+
+	foreach ($lines as $key => $line) {
+		$value = str_replace(array('{','}'), '', $line);
+		$lines[$key] = explode('::', $value);
+		$a = $lines[$key][0];
+		$b = $lines[$key][1];
+		$pub[$a] = $b;
+	}
 }
 
 ?>
