@@ -42,13 +42,14 @@ lan status response:
 
  */
 
+// dd-wrt config
 $router = '192.168.1.1';
-
 $user = 'root';
 $pass = 'password';
-
 $wifiStatusUrl = "http://$router/Status_Wireless.live.asp";
 $lanStatusUrl = "http://$router/Status_Lan.live.asp";
+// remote syslog location
+$rsyslog = '10.11.11.69';
 
 // check router every 3.5 seconds
 $delaySeconds = 3.5;
@@ -56,6 +57,7 @@ $delaySeconds = 3.5;
 // time before checking arp table/dhcp leases again
 // 1 hour in seconds
 $lanTimeout = 3600;
+
 
 $refreshLan = false;
 $delay = $delaySeconds * 1000000;
@@ -68,15 +70,19 @@ while (true) {
 	echo date('c') . "\t";
 
 	$clients = array();
+	$ssid = '';
 
 	// if it doesn't already exist, or it's midnight
 	// reset the old clients array
 	// this way we can output the diff each new day
-	if (!isset($clientsOld) || (date('H') == 0 && date('i') == 0 && date('s') < round($delaySeconds))) {
+	if (!isset($clientsOld) || !isset($ssidOld) || isMidnight()) {
 		$clientsOld = array();
+		$ssidOld = '';
 	}
 
 	getWifiStatus($pub);
+
+	$ssid = $pub['wl_ssid'];
 
 	// if we have some wireless clients
 	if (
@@ -96,7 +102,7 @@ while (true) {
 			// reset the timestamp
 			$pub['time'] = time();
 			echo "ping lan\t";
-			getLanStatus($pub);
+			getLanStatus();
 		} else {
 			echo "cached lan\t";
 		}
@@ -157,15 +163,23 @@ while (true) {
 		$refreshLan = false;
 	}
 
+	if ($ssid !== $ssidOld) {
+		echo $ssid;
+		sendRemoteSyslog($ssid, $router, 'pubclients-ssid');
+	}
+
+	$ssidOld = $ssid;
+
 	$clientsOld = $clients;
-	unset($clients, $clientsJson, $clientsJsonOld);
+	unset($clients, $clientsJson, $clientsJsonOld, $ssid);
 
 	echo "\n";
 
 	usleep($delay);
 }
 
-function getWifiStatus() {
+function getWifiStatus()
+{
 
 	global $wifiStatusUrl;
 	global $pub;
@@ -204,7 +218,8 @@ function getWifiStatus() {
 	}
 }
 
-function getLanStatus() {
+function getLanStatus()
+{
 
 	global $lanStatusUrl;
 	global $pub;
@@ -261,16 +276,19 @@ function getLanStatus() {
 	from papertrail app
 	https://gist.github.com/troy/2220679
  */
-function sendRemoteSyslog($message, $program = 'PHP', $component = 'script') {
+function sendRemoteSyslog($message, $program = 'PHP', $component = 'script')
+{
+	global $rsyslog;
 	$sock = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
 	foreach(explode("\n", $message) as $line) {
 		$syslog_message = '<22>' . date('M d H:i:s ') . $program . ' ' . $component . ': ' . $line;
-		socket_sendto($sock, $syslog_message, strlen($syslog_message), 0, 'prox.r0k', 514);
+		socket_sendto($sock, $syslog_message, strlen($syslog_message), 0, $rsyslog, 514);
 	}
 	socket_close($sock);
 }
 
-function curl($url) {
+function curl($url)
+{
 	global $user;
 	global $pass;
 
@@ -294,10 +312,14 @@ function curl($url) {
 		die("bad password\n");
 	}
 
-	return array($header, $body);
+	return array(
+		'header' => $header, 
+		'body' => $body
+	);
 }
 
-function formatResponseBody($body) {
+function formatResponseBody($body)
+{
 	global $pub;
 
 	$lines = explode("\n", $body);
@@ -310,6 +332,11 @@ function formatResponseBody($body) {
 		$b = $lines[$key][1];
 		$pub[$a] = $b;
 	}
+}
+
+function isMidnight()
+{
+	return (date('H') == 0 && date('i') == 0 && date('s') < round($delaySeconds));
 }
 
 ?>
