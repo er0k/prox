@@ -32,28 +32,6 @@ wrtDir='/tmp/proxy'
 # trap ctrl-c and call ctrl_c()
 trap ctrl_c INT
 
-ctrl_c () {
-    if [ -e "$socket" ];
-    then
-        ssh -S $socket -O exit $wrt
-    fi
-    exit 69
-}
-
-countDown () {
-    for i in `seq 60 -1 0`;
-    do
-        echo -ne "$i .\r"
-        sleep 0.25
-        echo -ne "$i ..\r"
-        sleep 0.25
-        echo -ne "$i ...\r"
-        sleep 0.25
-        echo -ne "$i     \r"
-        sleep 0.25
-    done
-}
-
 if [ -e "$socket" ];
 then
     echo 'socket already open'
@@ -75,6 +53,12 @@ then
         echo 'ok'
     fi
 fi
+
+checkProxy
+
+# close the socket
+ssh -S $socket -O exit $wrt
+
 
 checkProxy () {
     # get the current home IP
@@ -118,7 +102,24 @@ checkProxy () {
     fi
 }
 
-checkProxy
+countDown () {
+    for i in `seq 60 -1 0`;
+    do
+        echo -ne "$i .\r"
+        sleep 0.25
+        echo -ne "$i ..\r"
+        sleep 0.25
+        echo -ne "$i ...\r"
+        sleep 0.25
+        echo -ne "$i     \r"
+        sleep 0.25
+    done
+}
 
-# close the socket
-ssh -S $socket -O exit $wrt
+ctrl_c () {
+    if [ -e "$socket" ];
+    then
+        ssh -S $socket -O exit $wrt
+    fi
+    exit 69
+}
