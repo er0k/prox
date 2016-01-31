@@ -14,15 +14,17 @@ if (filter_var($ip, FILTER_VALIDATE_IP)) {
     $host = gethostbyaddr($ip);
 }
 
-if ($loc == 'y') {
-    require_once('geo.php');
-    $gi = geoip_open($geoipdb,GEOIP_STANDARD);
-    $record = geoip_record_by_addr($gi,$ip);
+if ($loc) {
+    $geoipdb = "/opt/geoip/GeoLiteCity.dat";
+    require_once('geoipcity.inc');
+    $gi = geoip_open($geoipdb, GEOIP_STANDARD);
+    $record = geoip_record_by_addr($gi, $ip);
+    geoip_close($gi);
 
     if ($txt) {
         $output = "$ip ($host)\n";
-        $output .= $record->country_name . "\n";
-        $output .= $record->city . ' ' . $record->region . ' ' . $record->postal_code . "\n";
+        $output .= "{$record->country_name}\n";
+        $output .= "{$record->city} {$record->region} {$record->postal_code}\n";
     } else if ($ssid) {
         $country = strtok(str_replace(' ', '', $record->country_name), "\n");
         $city = str_replace(' ', '', $record->city);
@@ -34,12 +36,11 @@ if ($loc == 'y') {
         $region = $country === 'US' ? $record->region : '';
         $output = substr(str_replace(',', '', $prefix . $city . $region . $country), 0, 32);
     } else {
-        $output = "<p>".$ip." (".$host.")</p>\n";
-        $output .= "<p>".$record->country_name . "</p>\n";
-        $output .= "<p>".$record->city." ".$record->region." ".$record->postal_code."</p>\n";
-        $output .= '<p><a href="http://maps.google.com/maps?q='.$record->latitude.'+'.$record->longitude.'">'.$record->latitude.' '.$record->longitude.'</a></p>';
+        $output = "<p>$ip ($host)</p>\n";
+        $output .= "<p>{$record->country_name}</p>\n";
+        $output .= "<p>{$record->city} {$record->region} {$record->postal_code}</p>\n";
+        $output .= "<p><a href='http://maps.google.com/maps?q={$record->latitude}+{$record->longitude}'>{$record->latitude} {$record->longitude}</a></p>";
     }
-    geoip_close($gi);
     echo iconv('ISO-8859-1', 'ASCII//TRANSLIT//IGNORE', $output);
 } else {
     echo $ip;
