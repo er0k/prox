@@ -72,10 +72,12 @@ checkProxy () {
 
     # get the proxy SSID
     currSsid=`ssh -S $socket -q $wrt 'wl ssid' | cut -d '"' -f 2`
+    currLocation=`echo $currSsid | cut -d '_' -f 2`
 
     # set the current SSID based on location
     ssid=`curl -s "https://$ext/ip.php?ip=$proxIp&loc=y&ssid=y&pre=$uid"`
-    if [ "$ssid" != "$currSsid" ];
+    location=`echo $ssid | cut -d '_' -f 2`
+    if [ "$location" != "$currLocation" ];
     then
         ssh -S $socket $wrt "wl ssid $ssid && nvram set wl_ssid=\"$ssid\""
     fi
