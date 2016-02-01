@@ -11,6 +11,13 @@ wrt=pub
 # ssh/scp control socket
 socket=/tmp/prox-sock
 
+# file to last last updated time
+counter=/tmp/prox-count
+
+# how often to force a new VPN connection, in seconds (1 day)
+# @todo : add a random time frame
+timeout=86400 
+
 # location outside your LAN to get external IP (ip.php)
 ext="er0k.net"
 
@@ -26,39 +33,33 @@ proxyList='/home/er0k/proxy/all'
 # directory containing openvpn conf files
 vpnDir='/home/er0k/pub'
 
-# diretory on wrt to store proxy files
+# directory on wrt to store proxy files
 wrtDir='/tmp/proxy'
 
 # trap ctrl-c and call ctrl_c()
 trap ctrl_c INT
 
-if [ -e "$socket" ];
-then
-    echo 'socket already open'
-    exit 1
-fi
-
-# start the shared ssh socket
-ssh -M -S $socket -fnNT $wrt
-
-# pass any argument to force a new vpn connection
-if [ $# -gt 0 ];
-then
-    echo -n 'killing existing proxy...'
-    ssh -S $socket $wrt 'killall openvpn'
-    if [ $? -ne 0 ]; then
-        echo 'ERROR'
-        exit 2
-    else
-        echo 'ok'
+ctrl_c () {
+    if [ -e "$socket" ];
+    then
+        ssh -S $socket -O exit $wrt
     fi
-fi
+    exit 69
+}
 
-checkProxy
-
-# close the socket
-ssh -S $socket -O exit $wrt
-
+countDown () {
+    for i in `seq 60 -1 0`;
+    do
+        echo -ne "$i .\r"
+        sleep 0.25
+        echo -ne "$i ..\r"
+        sleep 0.25
+        echo -ne "$i ...\r"
+        sleep 0.25
+        echo -ne "$i     \r"
+        sleep 0.25
+    done
+}
 
 checkProxy () {
     # get the current home IP
@@ -102,24 +103,38 @@ checkProxy () {
     fi
 }
 
-countDown () {
-    for i in `seq 60 -1 0`;
-    do
-        echo -ne "$i .\r"
-        sleep 0.25
-        echo -ne "$i ..\r"
-        sleep 0.25
-        echo -ne "$i ...\r"
-        sleep 0.25
-        echo -ne "$i     \r"
-        sleep 0.25
-    done
-}
+if [ -e "$socket" ];
+then
+    echo 'socket already open'
+    exit 1
+fi
 
-ctrl_c () {
-    if [ -e "$socket" ];
-    then
-        ssh -S $socket -O exit $wrt
-    fi
-    exit 69
-}
+# start the shared ssh socket
+ssh -M -S $socket -fnNT $wrt
+
+# write the counter
+if [ -e "$counter" ];
+then
+    lastupdate=`cat $counter`
+    now=`date +%s`
+    diff=`expr $now - $lastupdate`
+else
+    date +%s > $counter
+    diff=0
+fi
+
+echo "proxy last changed $diff seconds ago"
+
+# pass any argument to force a new vpn connection before the timeout
+if [ "$#" -gt 0 ] || [ "$diff" -gt "$timeout" ] ; then
+    echo -n 'killing existing proxy...'
+    ssh -S $socket $wrt 'killall openvpn'
+    date +%s > $counter
+    echo 'ok'
+fi
+
+checkProxy
+
+# close the socket
+ssh -S $socket -O exit $wrt
+
