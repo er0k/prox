@@ -42,14 +42,10 @@ lan status response:
 
  */
 
-// dd-wrt config
-$router = '192.168.1.1';
-$user = 'root';
-$pass = 'password';
+require_once('config.php');
+
 $wifiStatusUrl = "http://$router/Status_Wireless.live.asp";
 $lanStatusUrl = "http://$router/Status_Lan.live.asp";
-// remote syslog location
-$rsyslog = '10.11.11.69';
 
 // check router every 3.5 seconds
 $delaySeconds = 3.5;
