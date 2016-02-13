@@ -72,13 +72,8 @@ while (true) {
 	$clients = array();
 	$ssid = '';
 
-	// if it doesn't already exist, or it's midnight
-	// reset the old clients array
-	// this way we can output the diff each new day
-	if (!isset($clientsOld) || !isset($ssidOld) || isMidnight()) {
-		$clientsOld = array();
-		$ssidOld = '';
-	}
+	$clientsOld = isset($clientsOld) ? $clientsOld : array();
+	$ssidOld = isset($ssidOld) ? $ssidOld : '';
 
 	getWifiStatus($pub);
 
@@ -166,6 +161,11 @@ while (true) {
 	if ($ssid !== $ssidOld) {
 		echo $ssid;
 		sendRemoteSyslog($ssid, $router, 'pubclients-ssid');
+	}
+
+	if (isMidnight()) {
+		sendRemoteSyslog($ssid, $router, 'pubclients-ssid');
+		sendRemoteSyslog($clientsJson, $router, 'pubclients');
 	}
 
 	$ssidOld = $ssid;
