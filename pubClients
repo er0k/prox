@@ -42,14 +42,10 @@ lan status response:
 
  */
 
-// dd-wrt config
-$router = '192.168.1.1';
-$user = 'root';
-$pass = 'password';
+require_once('config.php');
+
 $wifiStatusUrl = "http://$router/Status_Wireless.live.asp";
 $lanStatusUrl = "http://$router/Status_Lan.live.asp";
-// remote syslog location
-$rsyslog = '10.11.11.69';
 
 // check router every 3.5 seconds
 $delaySeconds = 3.5;
@@ -72,13 +68,8 @@ while (true) {
 	$clients = array();
 	$ssid = '';
 
-	// if it doesn't already exist, or it's midnight
-	// reset the old clients array
-	// this way we can output the diff each new day
-	if (!isset($clientsOld) || !isset($ssidOld) || isMidnight()) {
-		$clientsOld = array();
-		$ssidOld = '';
-	}
+	$clientsOld = isset($clientsOld) ? $clientsOld : array();
+	$ssidOld = isset($ssidOld) ? $ssidOld : '';
 
 	getWifiStatus($pub);
 
@@ -166,6 +157,11 @@ while (true) {
 	if ($ssid !== $ssidOld) {
 		echo $ssid;
 		sendRemoteSyslog($ssid, $router, 'pubclients-ssid');
+	}
+
+	if (isMidnight()) {
+		sendRemoteSyslog($ssid, $router, 'pubclients-ssid');
+		sendRemoteSyslog($clientsJson, $router, 'pubclients');
 	}
 
 	$ssidOld = $ssid;
