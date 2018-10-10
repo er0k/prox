@@ -1,45 +1,56 @@
 <?php
-// geolocate ip address
-setlocale(LC_ALL, 'en_US.UTF8');
-$ip = isset($_GET['ip']) ? $_GET['ip'] : $_SERVER['REMOTE_ADDR'];
-$loc = isset($_GET['loc']) ? $_GET['loc'] : '';
-$txt = isset($_GET['txt']) ? true : false;
-$ssid = isset($_GET['ssid']) ? true : false;
-$prefix = isset($_GET['pre']) ? $_GET['pre'] : '';
 
-if (filter_var($ip, FILTER_VALIDATE_IP)) {
-    $host = gethostbyaddr($ip);
-} else {
+require 'vendor/autoload.php';
+
+setlocale(LC_ALL, 'en_US.UTF8');
+
+$countryDb = '/opt/geoip/country/GeoLite2-Country.mmdb';
+$cityDb = '/opt/geoip/city/GeoLite2-City.mmdb';
+
+$ip = $_GET['ip'] ?? $_GET['ip'] ?: $_SERVER['REMOTE_ADDR'];
+$getLocation = $_GET['loc'] ?? false;
+$plainText = $_GET['txt'] ?? false;
+$ssid = $_GET['ssid'] ?? false;
+$prefix = $_GET['pre'] ?? '';
+
+$host = gethostbyaddr($ip);
+
+if (!filter_var($ip, FILTER_VALIDATE_IP)) {
     $ip = gethostbyname($ip);
-    $host = gethostbyaddr($ip);
 }
 
-if ($loc) {
-    $geoipdb = "/opt/geoip/GeoLiteCity.dat";
-    require_once('geoipcity.inc');
-    $gi = geoip_open($geoipdb, GEOIP_STANDARD);
-    $record = geoip_record_by_addr($gi, $ip);
-    geoip_close($gi);
+if ($getLocation) {
+    $reader = new MaxMind\Db\Reader($cityDb);
+    $record = $reader->get($ip);
 
-    if ($txt) {
+    $continent = $record['continent']['names']['en'];
+    $country = $record['country']['names']['en'];
+    $city = $record['city']['names']['en'];
+    $region = $record['subdivisions'][0]['names']['en'];
+    $zip = $record['postal']['code'];
+    $lat = $record['location']['latitude'];
+    $lon = $record['location']['longitude'];
+    $tz = $record['location']['time_zone'];
+
+    if ($plainText) {
         $output = "$ip ($host)\n";
-        $output .= "{$record->country_name}\n";
-        $output .= "{$record->city} {$record->region} {$record->postal_code}\n";
+        $output .= "$country\n";
+        $output .= "$city $region $zip\n";
     } else if ($ssid) {
-        $country = strtok(str_replace(' ', '', $record->country_name), "\n");
-        $city = str_replace(' ', '', $record->city);
+        $country = strtok(str_replace(' ', '', $country), "\n");
+        $city = str_replace(' ', '', $city);
         if ($country === 'UnitedStates') {
             $country = 'US';
         } else if ($country === 'UnitedKingdom') {
             $country = 'UK';
         }
-        $region = $country === 'US' ? $record->region : '';
+        $region = $country === 'US' ? $region : '';
         $output = substr(str_replace(',', '', $prefix . $city . $region . $country), 0, 32);
     } else {
         $output = "<p>$ip ($host)</p>\n";
-        $output .= "<p>{$record->country_name}</p>\n";
-        $output .= "<p>{$record->city} {$record->region} {$record->postal_code}</p>\n";
-        $output .= "<p><a href='http://maps.google.com/maps?q={$record->latitude}+{$record->longitude}'>{$record->latitude} {$record->longitude}</a></p>";
+        $output .= "<p>$country</p>\n";
+        $output .= "<p>$city $region $zip</p>\n";
+        $output .= "<p><a href='http://maps.google.com/maps?q=$lat+$lon'>$lat $lon</a></p>";
     }
     echo iconv('ISO-8859-1', 'ASCII//TRANSLIT//IGNORE', $output);
 } else {
