@@ -23,5 +23,3 @@ Create a text file with all the IP addresses from your VPN provider. Each IP sho
 `pubclients.conf` is a simple way to daemonize it with upstart.
 
 You should get a username, password and certificate from your VPN provider. Put them in `pub/`. You should also put an actual IP in `pub/openvpn.conf` for the first run. After that `prox` will pattern match on the IP address to replace it with a random one. 
-
-if you need a good proxy service try https://proxy.sh :)
